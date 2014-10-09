@@ -10,14 +10,14 @@ Puppet::Type.newtype(:dns_rr) do
       if (value =~ /^([A-Z]+)\/([A-Z]+)\/((\*\.)?([a-zA-Z0-9_-]+\.)*[a-zA-Z0-9_-]+)$/)
         rrclass = $1
         if ( !%w(IN CH HS).include? rrclass )
-          Util::Errors.fail "Invalid resource record class: %s" % rrdata
+          fail "Invalid resource record class: %s" % rrdata
         end
         type = $2
         if ( !%w(A AAAA CNAME NS MX SPF SRV NAPTR PTR TXT).include? type)
-          Util::Errors.fail "Invalid resource record type: %s" % type
+          fail "Invalid resource record type: %s" % type
         end
       else
-        Util::Errors.fail "%s must be of the form Class/Type/Name" % value
+        fail "%s must be of the form Class/Type/Name" % value
       end
     end
   end
