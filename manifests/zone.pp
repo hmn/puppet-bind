@@ -78,4 +78,10 @@ define bind::zone (
         require => Package[$bind::params::bind_package],
     }
 
+    concat::fragment { "zone-include-${name}":
+        order   => '10',
+        target  => "${bind::confdir}/named.conf",
+        content => "include \"${bind::confdir}/zones/${name}.conf\";\n",
+    }
+
 }

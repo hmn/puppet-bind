@@ -55,12 +55,6 @@ class bind (
         require => Package[$::bind::params::bind_package],
     }
 
-    file { "${confdir}/named.conf":
-        content => template($template),
-        notify  => Service[$::bind::params::bind_service],
-        require => Package[$::bind::params::bind_package],
-    }
-
     class { 'bind::keydir':
         keydir => "${confdir}/keys",
         require => Package[$::bind::params::bind_package],
@@ -75,12 +69,19 @@ class bind (
         "${confdir}/acls.conf",
         "${confdir}/keys.conf",
         "${confdir}/views.conf",
+        "${confdir}/named.conf",
         ]:
         owner   => 'root',
         group   => $::bind::params::bind_group,
         mode    => '0644',
         notify  => Service[$::bind::params::bind_service],
         require => Package[$::bind::params::bind_package],
+    }
+
+    concat::fragment { "named-config":
+        order   => '00',
+        target  => "${confdir}/named.conf",
+        content => template($template),
     }
 
     concat::fragment { "named-acls-header":
@@ -98,7 +99,7 @@ class bind (
     concat::fragment { "named-keys-rndc":
         order   => '99',
         target  => "${confdir}/keys.conf",
-        content => "#include \"${confdir}/rndc.key\"\n",
+        content => "#include \"${confdir}/rndc.key\";\n",
     }
 
     concat::fragment { "named-views-header":
