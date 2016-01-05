@@ -1,5 +1,19 @@
+require 'socket'
+require 'resolv'
+
 Puppet::Type.newtype(:resource_record) do
   @doc = 'A Resource Record in the Domain Name System'
+
+  autorequire(:service) do
+    reqs = []
+    # Depend on the bind service if the record is local
+    reqs << 'bind' if Socket.ip_address_list.any? do |intf|
+      Resolv.getaddresses(self[:server]).any? do |addr|
+        intf.ip_address === addr
+      end
+    end
+    reqs
+  end
 
   ensurable
 
@@ -16,7 +30,7 @@ Puppet::Type.newtype(:resource_record) do
   newparam(:type) do
     desc 'The record type'
     isrequired
-    newvalues 'A', 'AAAA', 'CNAME', 'NS', 'MX', 'SPF', 'SRV', 'NAPTR', 'PTR', 'TXT'
+    newvalues 'A', 'AAAA', 'CNAME', 'NS', 'MX', 'SPF', 'SRV', 'NAPTR', 'PTR', 'TXT', 'DS'
   end
 
   newparam(:record) do
@@ -24,7 +38,7 @@ Puppet::Type.newtype(:resource_record) do
     isrequired
 
     validate do |value|
-      fail "Invalid value for record: #{value}" unless value =~ /^(\*\.)?([a-zA-Z0-9_-]+\.)*[a-zA-Z0-9_-]+$/
+      raise ArgumentError, "Invalid value for record: #{value}" unless value =~ /^(\*\.)?([a-zA-Z0-9_-]+\.)*[a-zA-Z0-9_-]+$/
     end
   end
 
@@ -37,9 +51,19 @@ Puppet::Type.newtype(:resource_record) do
     defaultto 'localhost'
   end
 
+  newparam(:query_section) do
+    desc 'The DNS response section to check for existing record values'
+    defaultto 'answer'
+    newvalues 'answer', 'authority', 'additional'
+  end
+
   newparam(:keyname) do
     desc 'Keyname for the TSIG key used to update the record'
     defaultto 'update'
+  end
+
+  newparam(:keyfile) do
+    desc 'Keyfile used to update the record'
   end
 
   newparam(:hmac) do

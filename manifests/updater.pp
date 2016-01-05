@@ -1,16 +1,14 @@
 # ex: syntax=puppet si ts=4 sw=4 et
 
 class bind::updater (
-    $nsupdate_package = $::bind::params::nsupdate_package,
-    $keydir           = "${::bind::params::confdir}/keys",
-) inherits bind::params {
-    package {'nsupdate':
-        name => $nsupdate_package,
-        ensure => present,
-    }
+    $keydir = undef,
+) inherits bind::defaults {
 
-    file { $::bind::params::confdir:
-        ensure => directory,
+    if $nsupdate_package {
+        package { 'nsupdate':
+            ensure => present,
+            name   => $nsupdate_package,
+        }
     }
 
     class { 'bind::keydir':

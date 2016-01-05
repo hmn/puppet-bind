@@ -1,25 +1,34 @@
 # ex: syntax=puppet si ts=4 sw=4 et
 
 class bind (
-    $confdir    = $::bind::params::confdir,
-    $cachedir   = $::bind::params::cachedir,
-    $forwarders = '',
-    $dnssec     = true,
-    $version    = '',
-    $rndc       = $::bind::params::bind_rndc,
-    $options    = [ ],
-    $template   = 'bind/named.conf.erb',
-) inherits bind::params {
+    $forwarders      = '',
+    $dnssec          = true,
+    $version         = '',
+    $rndc            = undef,
+    $statistics_port = undef,
+    $auth_nxdomain   = false,
+    $include_local   = false,
+    $options         = [ ],
+) inherits bind::defaults {
 
-    $auth_nxdomain = false
-
-    package { $::bind::params::bind_package:
-        ensure => latest,
+    File {
+        ensure  => present,
+        owner   => 'root',
+        group   => $bind_group,
+        mode    => '0644',
+        require => Package['bind'],
+        notify  => Service['bind'],
     }
 
-    file { $::bind::params::bind_files:
-        ensure  => present,
-        require => Package[$bind_package],
+    package{'bind-tools':
+        ensure => latest,
+        name   => $nsupdate_package,
+        before => Package['bind'],
+    }
+
+    package { 'bind':
+        ensure => latest,
+        name   => $bind_package,
     }
 
     if $dnssec {
@@ -32,37 +41,28 @@ class bind (
         }
     }
 
-    service { $::bind::params::bind_service:
-        ensure     => running,
-        enable     => true,
-        hasrestart => true,
-        hasstatus  => true,
-        require    => Package[$::bind::params::bind_package],
+    if $rndc {
+        # rndc only supports HMAC-MD5
+        bind::key { 'rndc-key':
+            algorithm   => 'hmac-md5',
+            secret_bits => '512',
+            keydir      => $confdir,
+            keyfile     => 'rndc.key',
+            include     => false,
+        }
     }
 
-    File {
-        ensure  => present,
-        owner   => 'root',
-        group   => $::bind::params::bind_group,
-        mode    => 0644,
-    }
-
-    file { [ $confdir, "${confdir}/zones" ]:
+    file { "${confdir}/zones":
         ensure  => directory,
-        mode    => 2755,
-        purge   => true,
-        recurse => true,
-        require => Package[$::bind::params::bind_package],
+        mode    => '2755',
+    }
+
+    file { $namedconf:
+        content => template('bind/named.conf.erb'),
     }
 
     class { 'bind::keydir':
         keydir => "${confdir}/keys",
-        require => Package[$::bind::params::bind_package],
-    }
-
-    file { "${confdir}/named.conf.local":
-        replace => false,
-        require => Package[$::bind::params::bind_package],
     }
 
     concat { [
@@ -72,39 +72,35 @@ class bind (
         "${confdir}/named.conf",
         ]:
         owner   => 'root',
-        group   => $::bind::params::bind_group,
+        group   => $bind_group,
         mode    => '0644',
-        notify  => Service[$::bind::params::bind_service],
-        require => Package[$::bind::params::bind_package],
+        require => Package['bind'],
+        notify  => Service['bind'],
     }
 
-    concat::fragment { "named-config":
-        order   => '00',
-        target  => "${confdir}/named.conf",
-        content => template($template),
-    }
-
-    concat::fragment { "named-acls-header":
+    concat::fragment { 'named-acls-header':
         order   => '00',
         target  => "${confdir}/acls.conf",
         content => "# This file is managed by puppet - changes will be lost\n",
     }
 
-    concat::fragment { "named-keys-header":
+    concat::fragment { 'named-keys-header':
         order   => '00',
         target  => "${confdir}/keys.conf",
         content => "# This file is managed by puppet - changes will be lost\n",
     }
 
-    concat::fragment { "named-keys-rndc":
-        order   => '99',
-        target  => "${confdir}/keys.conf",
-        content => "#include \"${confdir}/rndc.key\";\n",
-    }
-
-    concat::fragment { "named-views-header":
+    concat::fragment { 'named-views-header':
         order   => '00',
         target  => "${confdir}/views.conf",
         content => "# This file is managed by puppet - changes will be lost\n",
+    }
+
+    service { 'bind':
+        ensure     => running,
+        name       => $bind_service,
+        enable     => true,
+        hasrestart => true,
+        hasstatus  => true,
     }
 }

@@ -3,79 +3,146 @@
 define bind::zone (
     $zone_type,
     $domain          = '',
+    $dynamic         = true,
     $masters         = '',
+    $transfer_source = '',
     $allow_updates   = '',
+    $update_policies = '',
     $allow_transfers = '',
     $dnssec          = false,
+    $nsec3_salt      = '',
     $key_directory   = '',
     $ns_notify       = true,
     $also_notify     = '',
     $allow_notify    = '',
     $forwarders      = '',
     $forward         = '',
+    $source          = '',
 ) {
-    $cachedir = $bind::cachedir
+    # where there is a zone, there is a server
+    include bind
 
-    if $domain == '' {
-        $_domain = $name
-    } else {
-        $_domain = $domain
+    # Pull some platform defaults into the local scope
+    $cachedir = $::bind::defaults::cachedir
+    $random_device = $::bind::defaults::random_device
+    $bind_user = $::bind::defaults::bind_user
+    $bind_group = $::bind::defaults::bind_group
+
+    $_domain = pick($domain, $name)
+
+    unless !($masters != '' and ! member(['slave', 'stub'], $zone_type)) {
+        fail("masters may only be provided for bind::zone resources with zone_type 'slave' or 'stub'")
     }
 
-    $has_zone_file = $zone_type ? {
-        'master' => true,
-        'slave' => true,
-        'hint' => true,
-        'stub' => true,
-        default => false,
+    unless !($transfer_source != '' and ! member(['slave', 'stub'], $zone_type)) {
+        fail("transfer_source may only be provided for bind::zone resources with zone_type 'slave' or 'stub'")
     }
 
-    if $has_zone_file {
+    unless !($allow_updates != '' and ! $dynamic) {
+        fail("allow_updates may only be provided for bind::zone resources with dynamic set to true")
+    }
+
+    unless !($dnssec and ! $dynamic) {
+        fail("dnssec may only be true for bind::zone resources with dynamic set to true")
+    }
+
+    unless !($key_directory != '' and ! $dnssec) {
+        fail("key_directory may only be provided for bind::zone resources with dnssec set to true")
+    }
+
+    unless !($allow_notify != '' and ! member(['slave', 'stub'], $zone_type)) {
+        fail("allow_notify may only be provided for bind::zone resources with zone_type 'slave' or 'stub'")
+    }
+
+    unless !($forwarders != '' and $zone_type != 'forward') {
+        fail("forwarders may only be provided for bind::zone resources with zone_type 'forward'")
+    }
+
+    unless !($forward != '' and $zone_type != 'forward') {
+        fail("forward may only be provided for bind::zone resources with zone_type 'forward'")
+    }
+
+    unless !($source != '' and ! member(['master', 'hint'], $zone_type)) {
+        fail("source may only be provided for bind::zone resources with zone_type 'master' or 'hint'")
+    }
+
+    $zone_file_mode = $zone_type ? {
+        'master' => $dynamic ? {
+            true  => 'init',
+            false => 'managed',
+        },
+        'slave'  => 'allowed',
+        'hint'   => 'managed',
+        'stub'   => 'allowed',
+        default  => 'absent',
+    }
+
+    if member(['init', 'managed', 'allowed'], $zone_file_mode) {
         file { "${cachedir}/${name}":
             ensure  => directory,
-            owner   => $bind::params::bind_user,
-            group   => $bind::params::bind_group,
+            owner   => $bind_user,
+            group   => $bind_group,
             mode    => '0755',
-            require => Package[$bind::params::bind_package],
+            require => Package['bind'],
         }
 
-        file { "${cachedir}/${name}/${_domain}":
-            ensure  => present,
-            owner   => $bind::params::bind_user,
-            group   => $bind::params::bind_group,
-            mode    => '0644',
-            replace => false,
-            source  => 'puppet:///modules/bind/db.empty',
-            audit   => [ content ],
+        if member(['init', 'managed'], $zone_file_mode) {
+            file { "${cachedir}/${name}/${_domain}":
+                ensure  => present,
+                owner   => $bind_user,
+                group   => $bind_group,
+                mode    => '0644',
+                replace => ($zone_file_mode == 'managed'),
+                source  => pick($source, 'puppet:///modules/bind/db.empty'),
+                audit   => [ content ],
+            }
         }
 
-        if $dnssec {
-            exec { "dnssec-keygen-${name}":
-                command => "/usr/local/bin/dnssec-init '${cachedir}' '${name}' '${_domain}' '${key_directory}'",
-                cwd     => $cachedir,
-                user    => $bind::params::bind_user,
-                creates => "${cachedir}/${name}/${_domain}.signed",
-                timeout => 0, # crypto is hard
-                require => [ File['/usr/local/bin/dnssec-init'], File["${cachedir}/${name}/${_domain}"] ],
+        if $zone_file_mode == 'managed' {
+            exec { "rndc reload ${_domain}":
+                command     => "/usr/sbin/rndc reload ${_domain}",
+                user        => $bind_user,
+                refreshonly => true,
+                require     => Service['bind'],
+                subscribe   => File["${cachedir}/${name}/${_domain}"],
             }
-
-            file { "${cachedir}/${name}/${_domain}.signed":
-                owner => $bind::params::bind_user,
-                group => $bind::params::bind_group,
-                mode  => '0644',
-                audit => [ content ],
-            }
+        }
+    } elsif $zone_file_mode == 'absent' {
+        file { "${cachedir}/${name}":
+            ensure => absent,
         }
     }
 
-    file { "${bind::confdir}/zones/${name}.conf":
+    if $dnssec {
+        exec { "dnssec-keygen-${name}":
+            command => "/usr/local/bin/dnssec-init '${cachedir}' '${name}'\
+                '${_domain}' '${key_directory}' '${random_device}' '${nsec3_salt}'",
+            cwd     => $cachedir,
+            user    => $bind_user,
+            creates => "${cachedir}/${name}/${_domain}.signed",
+            timeout => 0, # crypto is hard
+            require => [
+                File['/usr/local/bin/dnssec-init'],
+                File["${cachedir}/${name}/${_domain}"]
+            ],
+        }
+
+        file { "${cachedir}/${name}/${_domain}.signed":
+            owner => $bind_user,
+            group => $bind_group,
+            mode  => '0644',
+            audit => [ content ],
+        }
+    }
+
+    file { "${::bind::confdir}/zones/${name}.conf":
         ensure  => present,
         owner   => 'root',
-        group   => $bind::params::bind_group,
+        group   => $bind_group,
         mode    => '0644',
         content => template('bind/zone.conf.erb'),
-        notify  => Service[$bind::params::bind_service],
-        require => Package[$bind::params::bind_package],
+        notify  => Service['bind'],
+        require => Package['bind'],
     }
 
     concat::fragment { "zone-include-${name}":

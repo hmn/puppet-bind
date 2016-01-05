@@ -1,6 +1,8 @@
 Puppet::Type.newtype(:dns_rr) do
   @doc = "A Resource Record in the DNS"
 
+  Puppet.warning('The dns_rr resource type is deprecated. Use resource_record instead')
+
   ensurable
 
   newparam(:spec, :namevar => true) do
@@ -10,14 +12,14 @@ Puppet::Type.newtype(:dns_rr) do
       if (value =~ /^([A-Z]+)\/([A-Z]+)\/((\*\.)?([a-zA-Z0-9_-]+\.)*[a-zA-Z0-9_-]+)$/)
         rrclass = $1
         if ( !%w(IN CH HS).include? rrclass )
-          fail "Invalid resource record class: %s" % rrdata
+          Util::Errors.fail "Invalid resource record class: %s" % rrdata
         end
         type = $2
-        if ( !%w(A AAAA CNAME NS MX SPF SRV NAPTR PTR TXT).include? type)
-          fail "Invalid resource record type: %s" % type
+        if ( !%w(A AAAA CNAME NS MX SPF SRV NAPTR PTR TXT DS).include? type)
+          Util::Errors.fail "Invalid resource record type: %s" % type
         end
       else
-        fail "%s must be of the form Class/Type/Name" % value
+        Util::Errors.fail "%s must be of the form Class/Type/Name" % value
       end
     end
   end
@@ -47,6 +49,12 @@ Puppet::Type.newtype(:dns_rr) do
   newparam(:server) do
     desc 'The master server for the resource record'
     defaultto 'localhost'
+  end
+
+  newparam(:query_section) do
+    desc 'The DNS response section to check for existing record values'
+    defaultto 'answer'
+    newvalues 'answer', 'authority', 'additional'
   end
 
   newparam(:keyname) do

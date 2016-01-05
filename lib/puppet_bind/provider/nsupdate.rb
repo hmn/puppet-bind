@@ -1,3 +1,4 @@
+# ex: syntax=ruby si sw=2 ts=2 et
 require 'tempfile'
 
 module PuppetBind
@@ -27,8 +28,8 @@ module PuppetBind
       def flush
         return if @properties.empty?
         update do |file|
-          destructo(file)
           accio(file)
+          destructo(file)
         end
       end
 
@@ -51,6 +52,8 @@ module PuppetBind
         file.close
         if keyed?
           nsupdate('-y', tsig_param, file.path)
+        elsif keyfile?
+          nsupdate('-k', kfile, file.path)
         else
           nsupdate(file.path)
         end
@@ -58,15 +61,51 @@ module PuppetBind
       end
 
       def accio(file)
-        newdata.each do |datum|
-          file.write "update add #{name}. #{resource[:ttl]} #{rrclass} #{type} #{datum}\n"
+        rrdata_adds.each do |datum|
+          file.write "update add #{name}. #{resource[:ttl]} #{rrclass} #{type} #{maybe_quote(type, datum)}\n"
         end
       end
 
       def destructo(file)
-        rrdata.each do |datum|
-          file.write "update delete #{name}. #{ttl} #{rrclass} #{type} #{datum}\n"
+        rrdata_deletes.each do |datum|
+          file.write "update delete #{name}. #{ttl} #{rrclass} #{type} #{maybe_quote(type, datum)}\n"
         end
+      end
+
+      def quoted_type?(type)
+        %w(TXT SPF).include?(type)
+      end
+
+      def escaped_type?(type)
+        %w(TXT).include?(type)
+      end
+
+      def spaced_type?(type)
+        %w(DS TLSA).include?(type)
+      end
+
+      def maybe_quote(type, datum)
+        quoted_type?(type) ? "\"#{datum}\"" : datum
+      end
+
+      def maybe_unquote(type, datum)
+        quoted_type?(type) ? datum.gsub(/^\"(.*)\"$/, '\1') : datum
+      end
+
+      def maybe_unescape(type, datum)
+        escaped_type?(type) ? datum.gsub(/\\;/, ';') : datum
+      end
+
+      def maybe_unspace(type, datum)
+        spaced_type?(type) ? datum.gsub(/^(\d+)\s+(\d+)\s+(\d+)\s+(\w+)\s+(\w+)$/, '\1 \2 \3 \4\5') : datum
+      end
+
+      def rrdata_adds
+        resource[:ensure] === :absent ? [] : newdata - rrdata
+      end
+
+      def rrdata_deletes
+        resource[:ensure] === :absent ? rrdata : (type === 'SOA' ? [] : rrdata - newdata)
       end
 
       def server
@@ -77,8 +116,20 @@ module PuppetBind
         resource[:zone]
       end
 
+      def query_section
+        resource[:query_section]
+      end
+
       def keyname
         resource[:keyname]
+      end
+
+      def kfile
+        resource[:keyfile]
+      end
+
+      def keyfile?
+        !kfile.nil?
       end
 
       def hmac
@@ -100,12 +151,15 @@ module PuppetBind
       def query
         unless @query
           if keyed?
-            dig_text = dig("@#{server}", '+noall', '+answer', name, type, '-c', rrclass, '-y', tsig_param)
+            dig_text = dig("@#{server}", '+noall', '+nosearch', '+norecurse', "+#{query_section}", name, type, '-c', rrclass, '-y', tsig_param)
           else
-            dig_text = dig("@#{server}", '+noall', '+answer', name, type, '-c', rrclass)
+            dig_text = dig("@#{server}", '+noall', '+nosearch', '+norecurse', "+#{query_section}", name, type, '-c', rrclass)
           end
           @query = dig_text.lines.map do |line|
             linearray = line.chomp.split(/\s+/, 5)
+            linearray[4] = maybe_unquote(linearray[3], linearray[4])
+            linearray[4] = maybe_unescape(linearray[3], linearray[4])
+            linearray[4] = maybe_unspace(linearray[3], linearray[4])
             {
               :name    => linearray[0],
               :ttl     => linearray[1],
