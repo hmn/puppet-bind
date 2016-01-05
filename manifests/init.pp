@@ -57,9 +57,9 @@ class bind (
         mode    => '2755',
     }
 
-    file { $namedconf:
-        content => template('bind/named.conf.erb'),
-    }
+    #file { $namedconf:
+    #    content => template('bind/named.conf.erb'),
+    #}
 
     class { 'bind::keydir':
         keydir => "${confdir}/keys",
@@ -69,12 +69,19 @@ class bind (
         "${confdir}/acls.conf",
         "${confdir}/keys.conf",
         "${confdir}/views.conf",
+        "${namedconf}"
         ]:
         owner   => 'root',
         group   => $bind_group,
         mode    => '0644',
         require => Package['bind'],
         notify  => Service['bind'],
+    }
+
+    concat::fragment { 'named-header':
+        order   => '00',
+        target  => "${confdir}/named.conf",
+        content => template('bind/named.conf.erb'),
     }
 
     concat::fragment { 'named-acls-header':
