@@ -69,7 +69,6 @@ class bind (
         "${confdir}/acls.conf",
         "${confdir}/keys.conf",
         "${confdir}/views.conf",
-        "${confdir}/named.conf",
         ]:
         owner   => 'root',
         group   => $bind_group,
